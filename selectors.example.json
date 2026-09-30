@@ -1,0 +1,10 @@
+{
+  "books.toscrape.com": {
+    "name": [".product_main h1"],
+    "price": [".product_main .price_color"]
+  },
+  "example-shop.com": {
+    "name": ["h1.pdp-title"],
+    "price": ["[data-testid='price']", ".pdp-price"]
+  }
+}

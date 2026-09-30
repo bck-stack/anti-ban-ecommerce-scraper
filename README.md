@@ -15,7 +15,9 @@ A resilient, production-grade web scraping engine designed to bypass modern anti
 
 ```
 smart-web-scraper/
-├── scraper.py          # Main scraper logic
+├── scraper.py              # Main scraper logic
+├── selectors.example.json  # Optional per-domain CSS selectors
+├── tests/                  # pytest suite
 ├── requirements.txt
 ├── .env.example
 └── output/             # Generated CSV files (git-ignored)
@@ -43,36 +45,73 @@ cp .env.example .env
 | `PROXY_LIST` | Comma-separated proxy URLs | none |
 | `MAX_RETRIES` | Retry attempts per URL | `3` |
 | `RETRY_DELAY` | Base delay between retries (seconds) | `2.0` |
-| `OUTPUT_DIR` | Output directory for CSV files | `output` |
+| `CONCURRENCY` | Pages scraped in parallel | `2` |
+| `NAV_TIMEOUT` | Navigation timeout (seconds) | `30` |
+| `PROXY_MAX_FAILURES` | Consecutive failures before a proxy is benched | `3` |
+| `PROXY_COOLDOWN` | Seconds a benched proxy is skipped | `300` |
+| `SELECTORS_FILE` | Per-domain selector overrides | `selectors.json` |
+| `OUTPUT_DIR` | Output directory for CSV/JSON files | `output` |
+
+## How the anti-ban logic works
+
+- **Proxy health tracking** – proxies rotate per attempt; one that keeps failing is benched for a cooldown,
+  and a retry never reuses the proxy that just failed. Authenticated proxies (`user:pass@`) are supported.
+- **Fresh fingerprint per attempt** – new browser context with random user agent, viewport and locale;
+  `navigator.webdriver` is hidden.
+- **Block detection** – 403/429/503 responses and captcha/"access denied" pages are treated as failures and retried.
+- **Backoff & pacing** – exponential backoff between retries, staggered starts, random human-like pauses and scrolling.
+- **Lean requests** – images, fonts and video are not downloaded (faster, less proxy bandwidth).
+- **Clean shutdown** – one browser per run, every context closed, Playwright stopped even on errors.
+
+## Data extraction
+
+1. **schema.org JSON-LD** (`Product` → `offers`) is read first — name, price, currency, availability, SKU.
+   Works on most modern shops without any selector.
+2. **CSS selectors** as a fallback: site-specific ones from `selectors.json`, then generic defaults.
+3. Prices are parsed locale-independently (`1.234,56 €`, `$1,234.56`, `1.234 TL`, `12,50 ₺`).
 
 ## Usage
 
 ```bash
-# Set target URLs in .env, then:
+# URLs from .env (TARGET_URLS)
 python scraper.py
+
+# URLs on the command line, also write JSON
+python scraper.py https://shop.com/p/1 https://shop.com/p/2 --json
+
+# URLs from a file (one per line, # for comments), visible browser
+python scraper.py --urls-file urls.txt --headful --concurrency 3
 ```
 
 ## Example Output
 
 ```
-2024-05-15 10:23:01 [INFO] Attempt 1/3 — URL: https://example.com/product — Proxy: None
-2024-05-15 10:23:04 [INFO] Scraped: A Light in the Attic | GBP 51.77
-2024-05-15 10:23:04 [INFO] Saved 1 records → output/products_20240515_102304.csv
+2024-05-15 10:23:01 [INFO] Attempt 1/3 | https://example.com/product | via direct
+2024-05-15 10:23:04 [INFO] Scraped: A Light in the Attic | GBP 51.77 [selectors]
+2024-05-15 10:23:04 [INFO] Saved 1 records -> output/products_20240515_102304.csv
 ```
 
 **CSV output:**
 ```csv
-url,name,price,currency,scraped_at
-https://...,A Light in the Attic,51.77,GBP,2024-05-15T10:23:04
+url,name,price,currency,availability,sku,source,scraped_at
+https://...,A Light in the Attic,51.77,GBP,,,selectors,2024-05-15T10:23:04+00:00
 ```
 
 ## Extending
 
-Override `_extract_product()` in `SmartScraper` to add site-specific CSS selectors for any target.
+Copy `selectors.example.json` to `selectors.json` and add the domain with its `name` / `price` selectors —
+no code changes needed. For deeper customization, override `_extract_product()` in `SmartScraper`.
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q
+```
 
 ## Tech Stack
 
-`playwright` · `httpx` · `python-dotenv`
+`playwright` · `asyncio` · `python-dotenv`
 
 ## Screenshot
 
